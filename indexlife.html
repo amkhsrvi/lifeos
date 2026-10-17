@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LifeOS</title>
+<style>
+  :root { --bg:#f4f6fb; --card:#fff; --text:#1d2433; --muted:#6b7385; --primary:#3b6df0; --danger:#d93f3f; --ok:#2a9d5c; --border:#e3e7f0; }
+  * { box-sizing: border-box; }
+  body { font-family: Tahoma, sans-serif; margin:0; background:var(--bg); color:var(--text); padding-bottom:80px; }
+  header { background:var(--primary); color:#fff; padding:16px; }
+  header .d { font-weight:bold; font-size:1.1em; }
+  header .t { font-size:.95em; opacity:.9; margin-top:2px; }
+  main { padding:12px; max-width:560px; margin:0 auto; }
+  .card { background:var(--card); border-radius:14px; padding:14px; margin-bottom:12px; box-shadow:0 1px 5px rgba(0,0,0,.07); }
+  .card h2 { margin:0 0 10px; font-size:1.05em; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .stat { background:var(--bg); border-radius:10px; padding:10px; text-align:center; }
+  .stat b { display:block; font-size:1.5em; }
+  .stat span { color:var(--muted); font-size:.85em; }
+  input, select, button, textarea { font-family:inherit; font-size:1em; }
+  input[type=text], input[type=date], input[type=number], select { width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; background:#fff; color:var(--text); margin-bottom:8px; }
+  button { border:0; border-radius:10px; padding:10px 14px; cursor:pointer; background:var(--primary); color:#fff; }
+  button.sec { background:var(--bg); color:var(--text); border:1px solid var(--border); }
+  button.del { background:transparent; color:var(--danger); padding:6px 8px; }
+  button.ed { background:transparent; color:var(--primary); padding:6px 8px; }
+  .task { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); }
+  .task:last-child { border-bottom:0; }
+  .task input[type=checkbox] { width:22px; height:22px; flex:none; }
+  .task .body { flex:1; min-width:0; }
+  .task .title { word-break:break-word; }
+  .task.done .title { text-decoration:line-through; color:var(--muted); }
+  .meta { font-size:.8em; color:var(--muted); margin-top:2px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:20px; font-size:.75em; margin-inline-end:4px; }
+  .p-high { background:#fde4e4; color:#b32626; }
+  .p-mid { background:#fff1d6; color:#8a5a00; }
+  .p-low { background:#e3f3ea; color:#1d7a46; }
+  .k-task { background:#e8eefc; color:#2a4fb8; }
+  .k-asg { background:#efe6fb; color:#6b35b0; }
+  .k-exam { background:#fde4e4; color:#b32626; }
+  .overdue { color:var(--danger); font-weight:bold; }
+  .empty { color:var(--muted); text-align:center; padding:14px 0; }
+  nav { position:fixed; bottom:0; right:0; left:0; background:#fff; border-top:1px solid var(--border); display:flex; z-index:5; }
+  nav button { flex:1; background:transparent; color:var(--muted); border-radius:0; padding:12px 4px; font-size:.85em; }
+  nav button.active { color:var(--primary); font-weight:bold; }
+  .filters { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  .filters button { padding:6px 12px; font-size:.85em; }
+  .filters button.active { background:var(--primary); color:#fff; }
+  .soon { color:var(--muted); text-align:center; padding:30px 10px; }
+  .dot { width:12px; height:12px; border-radius:50%; flex:none; }
+  .bar { height:6px; background:var(--border); border-radius:6px; margin-top:6px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <div class="d" id="hd-date"></div>
+  <div class="t" id="hd-time"></div>
+</header>
+<main id="app"></main>
+<nav>
+  <button data-v="home" class="active">🏠<br>داشبورد</button>
+  <button data-v="tasks">✅<br>وظایف</button>
+  <button data-v="school">🎓<br>مدرسه</button>
+  <button data-v="habits">🔁<br>عادت‌ها</button>
+</nav>
+
+<script>
+/* ============ ذخیره‌سازی ============ */
+const KEY = 'lifeos_data_v1';
+let db = { tasks: [], subjects: [], assignments: [], exams: [] };
+function load() {
+  try { const r = localStorage.getItem(KEY); if (r) db = Object.assign(db, JSON.parse(r)); }
+  catch (e) { console.error('خطا در خواندن داده', e); }
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(db)); }
+  catch (e) { alert('ذخیره‌سازی انجام نشد: ' + e.message); }
+}
+
+/* ============ ابزارهای تاریخ ============ */
+const fa = (n) => new Intl.NumberFormat('fa-IR', { useGrouping:false }).format(n);
+const pDate = (d, opt) => new Intl.DateTimeFormat('fa-IR-u-ca-persian', opt).format(d);
+function todayStr() {
+  const n = new Date();
+  return n.getFullYear() + '-' + String(n.getMonth()+1).padStart(2,'0') + '-' + String(n.getDate()).padStart(2,'0');
+}
+function showDate(s) { return s ? pDate(new Date(s + 'T12:00:00'), { year:'numeric', month:'long', day:'numeric' }) : ''; }
+function daysFromToday(s) {
+  const a = new Date(todayStr() + 'T12:00:00'), b = new Date(s + 'T12:00:00');
+  return Math.round((b - a) / 86400000);
+}
+function daysLabel(d) { return d === 0 ? 'امروز' : d === 1 ? 'فردا' : fa(d) + ' روز دیگر'; }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function pv(id) {
+  const v = document.getElementById(id).value;
+  document.getElementById('pv-' + id).textContent = v ? '📅 ' + showDate(v) : '';
+}
+function dateField(id, value) {
+  return '<label class="meta">تاریخ (انتخاب‌گر ممکن است میلادی نشان دهد؛ معادل شمسی زیرش نوشته می‌شود)</label>' +
+    '<input type="date" id="' + id + '" value="' + (value || '') + '" oninput="pv(\'' + id + '\')">' +
+    '<div class="meta" id="pv-' + id + '" style="margin-bottom:8px">' + (value ? '📅 ' + showDate(value) : '') + '</div>';
+}
+
+/* ============ وضعیت صفحه ============ */
+let view = 'home';
+let filter = 'open';
+let sv = 'subjects';          // زیربخش مدرسه
+let ed = null;                // {k:'task'|'asg'|'exam'|'sub', id}
+const isEd = (k) => ed && ed.k === k;
+
+const PRI = { high:['زیاد','p-high'], mid:['متوسط','p-mid'], low:['کم','p-low'] };
+const PRI_ORDER = { high:0, mid:1, low:2 };
+const COLORS = ['#3b6df0','#2a9d5c','#e07a1f','#a23bd1','#d93f3f','#0e9aa7','#c2a100','#6b7385'];
+
+/* ============ هدر ============ */
+function tick() {
+  const now = new Date();
+  document.getElementById('hd-date').textContent = pDate(now, { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  document.getElementById('hd-time').textContent = new Intl.DateTimeFormat('fa-IR', { hour:'2-digit', minute:'2-digit' }).format(now);
+}
+
+/* ============ وظایف ============ */
+function addOrUpdateTask() {
+  const title = document.getElementById('f-title').value.trim();
+  if (!title) { alert('عنوان وظیفه را بنویسید.'); return; }
+  const data = {
+    title,
+    priority: document.getElementById('f-pri').value,
+    due: document.getElementById('f-due').value,
+    minutes: parseInt(document.getElementById('f-min').value) || 0
+  };
+  if (isEd('task')) {
+    const t = db.tasks.find(x => x.id === ed.id);
+    if (t) Object.assign(t, data);
+    ed = null;
+  } else {
+    db.tasks.push(Object.assign({ id: Date.now(), done:false, created: todayStr() }, data));
+  }
+  save(); render();
+}
+function toggleTask(id) {
+  const t = db.tasks.find(x => x.id === id);
+  if (t) { t.done = !t.done; t.doneAt = t.done ? todayStr() : null; save(); render(); }
+}
+function deleteTask(id) {
+  if (!confirm('این وظیفه حذف شود؟')) return;
+  db.tasks = db.tasks.filter(x => x.id !== id); save(); render();
+}
+function editTask(id) { ed = { k:'task', id }; view = 'tasks'; render(); window.scrollTo(0,0); }
+function setFilter(f) { filter = f; render(); }
+function cancelEdit() { ed = null; render(); }
+
+/* ============ درس‌ها ============ */
+function getSub(id) { return db.subjects.find(s => s.id === id); }
+function subTag(id) {
+  const s = getSub(id);
+  return s ? '<span class="tag" style="background:' + s.color + '22;color:' + s.color + '">' + esc(s.name) + '</span>' : '';
+}
+function saveSubject() {
+  const name = document.getElementById('s-name').value.trim();
+  if (!name) { alert('نام درس را بنویسید.'); return; }
+  if (isEd('sub')) {
+    const s = getSub(ed.id); if (s) s.name = name; ed = null;
+  } else {
+    db.subjects.push({ id: Date.now(), name, color: COLORS[db.subjects.length % COLORS.length] });
+  }
+  save(); render();
+}
+function editSubject(id) { ed = { k:'sub', id }; render(); window.scrollTo(0,0); }
+function deleteSubject(id) {
+  const na = db.assignments.filter(a => a.subjectId === id).length;
+  const ne = db.exams.filter(x => x.subjectId === id).length;
+  let msg = 'این درس حذف شود؟';
+  if (na || ne) msg += '\nتوجه: ' + fa(na) + ' تکلیف و ' + fa(ne) + ' امتحان مربوط به این درس هم حذف می‌شود.';
+  if (!confirm(msg)) return;
+  db.subjects = db.subjects.filter(s => s.id !== id);
+  db.assignments = db.assignments.filter(a => a.subjectId !== id);
+  db.exams = db.exams.filter(x => x.subjectId !== id);
+  save(); render();
+}
+
+/* ============ تکالیف ============ */
+function saveAsg() {
+  const title = document.getElementById('a-title').value.trim();
+  const subjectId = parseInt(document.getElementById('a-sub').value);
+  if (!title) { alert('عنوان تکلیف را بنویسید.'); return; }
+  const data = { title, subjectId, due: document.getElementById('a-due').value };
+  if (isEd('asg')) {
+    const a = db.assignments.find(x => x.id === ed.id); if (a) Object.assign(a, data); ed = null;
+  } else {
+    db.assignments.push(Object.assign({ id: Date.now(), done:false }, data));
+  }
+  save(); render();
+}
+function toggleAsg(id) {
+  const a = db.assignments.find(x => x.id === id);
+  if (a) { a.done = !a.done; a.doneAt = a.done ? todayStr() : null; save(); render(); }
+}
+function deleteAsg(id) {
+  if (!confirm('این تکلیف حذف شود؟')) return;
+  db.assignments = db.assignments.filter(x => x.id !== id); save(); render();
+}
+function editAsg(id) { ed = { k:'asg', id }; sv = 'asg'; view = 'school'; render(); window.scrollTo(0,0); }
+
+/* ============ امتحان‌ها ============ */
+function saveExam() {
+  const title = document.getElementById('e-title').value.trim() || 'امتحان';
+  const subjectId = parseInt(document.getElementById('e-sub').value);
+  const date = document.getElementById('e-date').value;
+  if (!date) { alert('تاریخ امتحان را انتخاب کنید.'); return; }
+  const data = { title, subjectId, date };
+  if (isEd('exam')) {
+    const x = db.exams.find(y => y.id === ed.id); if (x) Object.assign(x, data); ed = null;
+  } else {
+    db.exams.push(Object.assign({ id: Date.now() }, data));
+  }
+  save(); render();
+}
+function deleteExam(id) {
+  if (!confirm('این امتحان حذف شود؟')) return;
+  db.exams = db.exams.filter(x => x.id !== id); save(); render();
+}
+function editExam(id) { ed = { k:'exam', id }; sv = 'exam'; view = 'school'; render(); window.scrollTo(0,0); }
+
+/* ============ قطعات نمایش ============ */
+function taskHTML(t) {
+  const [pl, pc] = PRI[t.priority] || PRI.mid;
+  let due = '';
+  if (t.due) {
+    const d = daysFromToday(t.due);
+    if (!t.done && d < 0) due = '<span class="overdue">⚠ گذشته: ' + showDate(t.due) + '</span>';
+    else if (d === 0) due = 'مهلت: امروز';
+    else due = 'مهلت: ' + showDate(t.due);
+  }
+  const dur = t.minutes ? ' • ' + fa(t.minutes) + ' دقیقه' : '';
+  return '<div class="task ' + (t.done ? 'done' : '') + '">' +
+    '<input type="checkbox" ' + (t.done ? 'checked' : '') + ' onchange="toggleTask(' + t.id + ')">' +
+    '<div class="body"><div class="title">' + esc(t.title) + '</div>' +
+    '<div class="meta"><span class="tag ' + pc + '">' + pl + '</span>' + due + dur + '</div></div>' +
+    '<button class="ed" onclick="editTask(' + t.id + ')">ویرایش</button>' +
+    '<button class="del" onclick="deleteTask(' + t.id + ')">حذف</button></div>';
+}
+function asgHTML(a) {
+  let due = '';
+  if (a.due) {
+    const d = daysFromToday(a.due);
+    if (!a.done && d < 0) due = '<span class="overdue">⚠ گذشته: ' + showDate(a.due) + '</span>';
+    else due = 'مهلت: ' + (d === 0 ? 'امروز' : showDate(a.due));
+  }
+  return '<div class="task ' + (a.done ? 'done' : '') + '">' +
+    '<input type="checkbox" ' + (a.done ? 'checked' : '') + ' onchange="toggleAsg(' + a.id + ')">' +
+    '<div class="body"><div class="title">' + esc(a.title) + '</div>' +
+    '<div class="meta">' + subTag(a.subjectId) + due + '</div></div>' +
+    '<button class="ed" onclick="editAsg(' + a.id + ')">ویرایش</button>' +
+    '<button class="del" onclick="deleteAsg(' + a.id + ')">حذف</button></div>';
+}
+function examHTML(x) {
+  const d = daysFromToday(x.date);
+  const when = d < 0 ? '<span class="meta">برگزار شده</span>' : '<b>' + daysLabel(d) + '</b>';
+  return '<div class="task"><div class="body"><div class="title">📝 ' + esc(x.title) + '</div>' +
+    '<div class="meta">' + subTag(x.subjectId) + showDate(x.date) + ' • ' + when + '</div></div>' +
+    '<button class="ed" onclick="editExam(' + x.id + ')">ویرایش</button>' +
+    '<button class="del" onclick="deleteExam(' + x.id + ')">حذف</button></div>';
+}
+function sortTasks(list) {
+  return list.slice().sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    const da = a.due || '9999', dbb = b.due || '9999';
+    if (da !== dbb) return da < dbb ? -1 : 1;
+    return PRI_ORDER[a.priority] - PRI_ORDER[b.priority];
+  });
+}
+function byDue(a, b) { return (a.due || '9999') < (b.due || '9999') ? -1 : (a.due || '9999') > (b.due || '9999') ? 1 : 0; }
+
+/* ============ داشبورد ============ */
+function renderHome() {
+  const today = todayStr();
+  const openT = db.tasks.filter(t => !t.done);
+  const openA = db.assignments.filter(a => !a.done);
+  const overdue = openT.filter(t => t.due && t.due < today).length + openA.filter(a => a.due && a.due < today).length;
+  const dueToday = openT.filter(t => t.due === today).length + openA.filter(a => a.due === today).length;
+  const doneToday = db.tasks.filter(t => t.doneAt === today).length + db.assignments.filter(a => a.doneAt === today).length;
+  const important = sortTasks(openT.filter(t => t.priority === 'high')).slice(0, 5);
+
+  // فهرست یکپارچه‌ی مهلت‌ها
+  let items = [];
+  openT.filter(t => t.due && t.due >= today).forEach(t => items.push({ kind:'وظیفه', cls:'k-task', title:t.title, date:t.due }));
+  openA.filter(a => a.due && a.due >= today).forEach(a => items.push({ kind:'تکلیف', cls:'k-asg', title:a.title, date:a.due, sub:a.subjectId }));
+  db.exams.filter(x => x.date >= today).forEach(x => items.push({ kind:'امتحان', cls:'k-exam', title:x.title, date:x.date, sub:x.subjectId }));
+  items.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  items = items.slice(0, 7);
+
+  let h = '<div class="card"><h2>خلاصه‌ی امروز</h2><div class="stats">' +
+    '<div class="stat"><b>' + fa(openT.length + openA.length) + '</b><span>کار باز</span></div>' +
+    '<div class="stat"><b>' + fa(doneToday) + '</b><span>انجام‌شده امروز</span></div>' +
+    '<div class="stat"><b>' + fa(dueToday) + '</b><span>مهلت امروز</span></div>' +
+    '<div class="stat"><b style="color:' + (overdue ? 'var(--danger)' : 'inherit') + '">' + fa(overdue) + '</b><span>گذشته از مهلت</span></div></div></div>';
+
+  h += '<div class="card"><h2>مهلت‌ها و امتحان‌های پیش‌رو</h2>' +
+    (items.length ? items.map(i => {
+      const d = daysFromToday(i.date);
+      return '<div class="task"><div class="body"><div class="title">' + esc(i.title) + '</div><div class="meta">' +
+        '<span class="tag ' + i.cls + '">' + i.kind + '</span>' + (i.sub ? subTag(i.sub) : '') +
+        showDate(i.date) + ' • ' + daysLabel(d) + '</div></div></div>';
+    }).join('') : '<div class="empty">مهلت نزدیکی ثبت نشده.</div>') + '</div>';
+
+  h += '<div class="card"><h2>کارهای مهم</h2>' +
+    (important.length ? important.map(taskHTML).join('') : '<div class="empty">وظیفه‌ی مهمی ندارید 🎉</div>') + '</div>';
+  h += '<div class="card"><button style="width:100%" onclick="view=\'tasks\';render()">+ افزودن وظیفه</button></div>';
+  return h;
+}
+
+/* ============ وظایف ============ */
+function renderTasks() {
+  const e = isEd('task') ? db.tasks.find(x => x.id === ed.id) : null;
+  let h = '<div class="card"><h2>' + (e ? 'ویرایش وظیفه' : 'وظیفه‌ی جدید') + '</h2>' +
+    '<input type="text" id="f-title" placeholder="عنوان وظیفه" value="' + (e ? esc(e.title) : '') + '">' +
+    '<select id="f-pri">' +
+      ['high','mid','low'].map(k => '<option value="' + k + '"' + ((e ? e.priority : 'mid') === k ? ' selected' : '') + '>اولویت: ' + PRI[k][0] + '</option>').join('') +
+    '</select>' +
+    dateField('f-due', e ? e.due : '') +
+    '<input type="number" id="f-min" placeholder="زمان تخمینی (دقیقه)" min="0" value="' + (e && e.minutes ? e.minutes : '') + '">' +
+    '<div class="row"><button onclick="addOrUpdateTask()">' + (e ? 'ذخیره‌ی تغییرات' : 'افزودن') + '</button>' +
+    (e ? '<button class="sec" onclick="cancelEdit()">انصراف</button>' : '') + '</div></div>';
+
+  const today = todayStr();
+  let list = db.tasks;
+  if (filter === 'open') list = list.filter(t => !t.done);
+  else if (filter === 'done') list = list.filter(t => t.done);
+  else if (filter === 'overdue') list = list.filter(t => !t.done && t.due && t.due < today);
+  const names = { open:'باز', overdue:'گذشته', done:'انجام‌شده', all:'همه' };
+  h += '<div class="card"><div class="filters">' +
+    Object.keys(names).map(k => '<button class="sec ' + (filter === k ? 'active' : '') + '" onclick="setFilter(\'' + k + '\')">' + names[k] + '</button>').join('') +
+    '</div>' + (list.length ? sortTasks(list).map(taskHTML).join('') : '<div class="empty">موردی نیست.</div>') + '</div>';
+  return h;
+}
+
+/* ============ مدرسه ============ */
+function subjectSelect(id, selected) {
+  return '<select id="' + id + '">' + db.subjects.map(s =>
+    '<option value="' + s.id + '"' + (s.id === selected ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('') + '</select>';
+}
+function renderSchool() {
+  const tabs = { subjects:'درس‌ها', asg:'تکالیف', exam:'امتحان‌ها' };
+  let h = '<div class="card"><div class="filters" style="margin:0">' +
+    Object.keys(tabs).map(k => '<button class="sec ' + (sv === k ? 'active' : '') + '" onclick="sv=\'' + k + '\';ed=null;render()">' + tabs[k] + '</button>').join('') + '</div></div>';
+
+  if (sv === 'subjects') {
+    const e = isEd('sub') ? getSub(ed.id) : null;
+    h += '<div class="card"><h2>' + (e ? 'ویرایش درس' : 'درس جدید') + '</h2>' +
+      '<input type="text" id="s-name" placeholder="مثلاً: ریاضی" value="' + (e ? esc(e.name) : '') + '">' +
+      '<div class="row"><button onclick="saveSubject()">' + (e ? 'ذخیره' : 'افزودن درس') + '</button>' +
+      (e ? '<button class="sec" onclick="cancelEdit()">انصراف</button>' : '') + '</div></div>';
+    h += '<div class="card"><h2>درس‌های من</h2>' + (db.subjects.length ? db.subjects.map(s => {
+      const all = db.assignments.filter(a => a.subjectId === s.id);
+      const done = all.filter(a => a.done).length;
+      const pct = all.length ? Math.round(done / all.length * 100) : 0;
+      return '<div class="task"><span class="dot" style="background:' + s.color + '"></span>' +
+        '<div class="body"><div class="title">' + esc(s.name) + '</div>' +
+        '<div class="meta">تکالیف انجام‌شده: ' + fa(done) + ' از ' + fa(all.length) + '</div>' +
+        '<div class="bar"><i style="width:' + pct + '%"></i></div></div>' +
+        '<button class="ed" onclick="editSubject(' + s.id + ')">ویرایش</button>' +
+        '<button class="del" onclick="deleteSubject(' + s.id + ')">حذف</button></div>';
+    }).join('') : '<div class="empty">هنوز درسی اضافه نکرده‌اید.</div>') + '</div>';
+  } else if (!db.subjects.length) {
+    h += '<div class="card empty">ابتدا از تب «درس‌ها» یک درس بسازید.</div>';
+  } else if (sv === 'asg') {
+    const e = isEd('asg') ? db.assignments.find(x => x.id === ed.id) : null;
+    h += '<div class="card"><h2>' + (e ? 'ویرایش تکلیف' : 'تکلیف جدید') + '</h2>' +
+      subjectSelect('a-sub', e ? e.subjectId : db.subjects[0].id) +
+      '<input type="text" id="a-title" placeholder="عنوان تکلیف" value="' + (e ? esc(e.title) : '') + '">' +
+      dateField('a-due', e ? e.due : '') +
+      '<div class="row"><button onclick="saveAsg()">' + (e ? 'ذخیره‌ی تغییرات' : 'افزودن') + '</button>' +
+      (e ? '<button class="sec" onclick="cancelEdit()">انصراف</button>' : '') + '</div></div>';
+    const list = db.assignments.slice().sort((a, b) => (a.done !== b.done) ? (a.done ? 1 : -1) : byDue(a, b));
+    h += '<div class="card"><h2>تکالیف</h2>' + (list.length ? list.map(asgHTML).join('') : '<div class="empty">تکلیفی ثبت نشده.</div>') + '</div>';
+  } else {
+    const e = isEd('exam') ? db.exams.find(x => x.id === ed.id) : null;
+    h += '<div class="card"><h2>' + (e ? 'ویرایش امتحان' : 'امتحان جدید') + '</h2>' +
+      subjectSelect('e-sub', e ? e.subjectId : db.subjects[0].id) +
+      '<input type="text" id="e-title" placeholder="عنوان (مثلاً: میان‌ترم)" value="' + (e ? esc(e.title) : '') + '">' +
+      dateField('e-date', e ? e.date : '') +
+      '<div class="row"><button onclick="saveExam()">' + (e ? 'ذخیره‌ی تغییرات' : 'افزودن') + '</button>' +
+      (e ? '<button class="sec" onclick="cancelEdit()">انصراف</button>' : '') + '</div></div>';
+    const list = db.exams.slice().sort((a, b) => a.date < b.date ? -1 : 1);
+    h += '<div class="card"><h2>امتحان‌ها</h2>' + (list.length ? list.map(examHTML).join('') : '<div class="empty">امتحانی ثبت نشده.</div>') + '</div>';
+  }
+  return h;
+}
+
+function renderSoon(title) {
+  return '<div class="card soon"><h2>' + title + '</h2>این بخش در گام‌های بعدی ساخته می‌شود.</div>';
+}
+
+function render() {
+  const app = document.getElementById('app');
+  if (view === 'home') app.innerHTML = renderHome();
+  else if (view === 'tasks') app.innerHTML = renderTasks();
+  else if (view === 'school') app.innerHTML = renderSchool();
+  else app.innerHTML = renderSoon('🔁 عادت‌ها');
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.v === view));
+}
+
+document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
+  view = b.dataset.v; ed = null; render(); window.scrollTo(0,0);
+}));
+
+load(); tick(); setInterval(tick, 30000); render();
+</script>
+</body>
+</html>
