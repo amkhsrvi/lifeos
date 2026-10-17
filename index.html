@@ -5,32 +5,228 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LifeOS</title>
 <style>
-  body { font-family: Tahoma, sans-serif; margin: 0; padding: 20px;
-         background: #f4f6fb; color: #1d2433; text-align: center; }
-  .card { background: #fff; border-radius: 16px; padding: 20px;
-          margin: 16px auto; max-width: 420px;
-          box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-  h1 { margin-top: 0; }
-  #date { font-size: 1.3em; font-weight: bold; }
-  #time { font-size: 2em; margin-top: 8px; }
+  :root { --bg:#f4f6fb; --card:#fff; --text:#1d2433; --muted:#6b7385; --primary:#3b6df0; --danger:#d93f3f; --ok:#2a9d5c; --border:#e3e7f0; }
+  * { box-sizing: border-box; }
+  body { font-family: Tahoma, sans-serif; margin:0; background:var(--bg); color:var(--text); padding-bottom:80px; }
+  header { background:var(--primary); color:#fff; padding:16px; }
+  header .d { font-weight:bold; font-size:1.1em; }
+  header .t { font-size:.95em; opacity:.9; margin-top:2px; }
+  main { padding:12px; max-width:560px; margin:0 auto; }
+  .card { background:var(--card); border-radius:14px; padding:14px; margin-bottom:12px; box-shadow:0 1px 5px rgba(0,0,0,.07); }
+  .card h2 { margin:0 0 10px; font-size:1.05em; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .stat { background:var(--bg); border-radius:10px; padding:10px; text-align:center; }
+  .stat b { display:block; font-size:1.5em; }
+  .stat span { color:var(--muted); font-size:.85em; }
+  input, select, button, textarea { font-family:inherit; font-size:1em; }
+  input[type=text], input[type=date], input[type=number], select { width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; background:#fff; color:var(--text); margin-bottom:8px; }
+  button { border:0; border-radius:10px; padding:10px 14px; cursor:pointer; background:var(--primary); color:#fff; }
+  button.sec { background:var(--bg); color:var(--text); border:1px solid var(--border); }
+  button.del { background:transparent; color:var(--danger); padding:6px 8px; }
+  button.ed { background:transparent; color:var(--primary); padding:6px 8px; }
+  .task { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); }
+  .task:last-child { border-bottom:0; }
+  .task input[type=checkbox] { width:22px; height:22px; flex:none; }
+  .task .body { flex:1; min-width:0; }
+  .task .title { word-break:break-word; }
+  .task.done .title { text-decoration:line-through; color:var(--muted); }
+  .meta { font-size:.8em; color:var(--muted); margin-top:2px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:20px; font-size:.75em; margin-inline-end:4px; }
+  .p-high { background:#fde4e4; color:#b32626; }
+  .p-mid { background:#fff1d6; color:#8a5a00; }
+  .p-low { background:#e3f3ea; color:#1d7a46; }
+  .overdue { color:var(--danger); font-weight:bold; }
+  .empty { color:var(--muted); text-align:center; padding:14px 0; }
+  nav { position:fixed; bottom:0; right:0; left:0; background:#fff; border-top:1px solid var(--border); display:flex; z-index:5; }
+  nav button { flex:1; background:transparent; color:var(--muted); border-radius:0; padding:12px 4px; font-size:.85em; }
+  nav button.active { color:var(--primary); font-weight:bold; }
+  .filters { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  .filters button { padding:6px 12px; font-size:.85em; }
+  .filters button.active { background:var(--primary); color:#fff; }
+  .hidden { display:none; }
+  .soon { color:var(--muted); text-align:center; padding:30px 10px; }
 </style>
 </head>
 <body>
-  <div class="card">
-    <h1>سلام! به LifeOS خوش آمدید 👋</h1>
-    <div id="date"></div>
-    <div id="time"></div>
-  </div>
+<header>
+  <div class="d" id="hd-date"></div>
+  <div class="t" id="hd-time"></div>
+</header>
+<main id="app"></main>
+<nav>
+  <button data-v="home" class="active">🏠<br>داشبورد</button>
+  <button data-v="tasks">✅<br>وظایف</button>
+  <button data-v="school">🎓<br>مدرسه</button>
+  <button data-v="habits">🔁<br>عادت‌ها</button>
+</nav>
+
 <script>
-  function tick() {
-    const now = new Date();
-    document.getElementById('date').textContent =
-      new Intl.DateTimeFormat('fa-IR-u-ca-persian',
-        { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).format(now);
-    document.getElementById('time').textContent =
-      new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(now);
+/* ============ ذخیره‌سازی ============ */
+const KEY = 'lifeos_data_v1';
+let db = { tasks: [] };
+function load() {
+  try { const r = localStorage.getItem(KEY); if (r) db = Object.assign(db, JSON.parse(r)); }
+  catch (e) { console.error('خطا در خواندن داده', e); }
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(db)); }
+  catch (e) { alert('ذخیره‌سازی انجام نشد: ' + e.message); }
+}
+
+/* ============ ابزارهای تاریخ ============ */
+const fa = (n) => new Intl.NumberFormat('fa-IR', { useGrouping:false }).format(n);
+const pDate = (d, opt) => new Intl.DateTimeFormat('fa-IR-u-ca-persian', opt).format(d);
+function todayStr() {
+  const n = new Date();
+  return n.getFullYear() + '-' + String(n.getMonth()+1).padStart(2,'0') + '-' + String(n.getDate()).padStart(2,'0');
+}
+function showDate(s) { return s ? pDate(new Date(s + 'T12:00:00'), { year:'numeric', month:'long', day:'numeric' }) : ''; }
+function daysFromToday(s) {
+  const a = new Date(todayStr() + 'T12:00:00'), b = new Date(s + 'T12:00:00');
+  return Math.round((b - a) / 86400000);
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ============ وضعیت صفحه ============ */
+let view = 'home';
+let filter = 'open';
+let editingId = null;
+
+const PRI = { high:['زیاد','p-high'], mid:['متوسط','p-mid'], low:['کم','p-low'] };
+const PRI_ORDER = { high:0, mid:1, low:2 };
+
+/* ============ هدر ============ */
+function tick() {
+  const now = new Date();
+  document.getElementById('hd-date').textContent = pDate(now, { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  document.getElementById('hd-time').textContent = new Intl.DateTimeFormat('fa-IR', { hour:'2-digit', minute:'2-digit' }).format(now);
+}
+
+/* ============ عملیات وظایف ============ */
+function addOrUpdateTask() {
+  const title = document.getElementById('f-title').value.trim();
+  if (!title) { alert('عنوان وظیفه را بنویسید.'); return; }
+  const data = {
+    title,
+    priority: document.getElementById('f-pri').value,
+    due: document.getElementById('f-due').value,
+    minutes: parseInt(document.getElementById('f-min').value) || 0
+  };
+  if (editingId) {
+    const t = db.tasks.find(x => x.id === editingId);
+    if (t) Object.assign(t, data);
+    editingId = null;
+  } else {
+    db.tasks.push(Object.assign({ id: Date.now(), done:false, created: todayStr() }, data));
   }
-  tick(); setInterval(tick, 1000);
+  save(); render();
+}
+function toggleTask(id) {
+  const t = db.tasks.find(x => x.id === id);
+  if (t) { t.done = !t.done; t.doneAt = t.done ? todayStr() : null; save(); render(); }
+}
+function deleteTask(id) {
+  if (!confirm('این وظیفه حذف شود؟')) return;
+  db.tasks = db.tasks.filter(x => x.id !== id); save(); render();
+}
+function editTask(id) { editingId = id; view = 'tasks'; render(); window.scrollTo(0,0); }
+function cancelEdit() { editingId = null; render(); }
+function setFilter(f) { filter = f; render(); }
+
+/* ============ نمایش ============ */
+function taskHTML(t) {
+  const [pl, pc] = PRI[t.priority] || PRI.mid;
+  let due = '';
+  if (t.due) {
+    const d = daysFromToday(t.due);
+    if (!t.done && d < 0) due = '<span class="overdue">⚠ گذشته: ' + showDate(t.due) + '</span>';
+    else if (d === 0) due = 'مهلت: امروز';
+    else due = 'مهلت: ' + showDate(t.due);
+  }
+  const dur = t.minutes ? ' • ' + fa(t.minutes) + ' دقیقه' : '';
+  return '<div class="task ' + (t.done ? 'done' : '') + '">' +
+    '<input type="checkbox" ' + (t.done ? 'checked' : '') + ' onchange="toggleTask(' + t.id + ')">' +
+    '<div class="body"><div class="title">' + esc(t.title) + '</div>' +
+    '<div class="meta"><span class="tag ' + pc + '">' + pl + '</span>' + due + dur + '</div></div>' +
+    '<button class="ed" onclick="editTask(' + t.id + ')">ویرایش</button>' +
+    '<button class="del" onclick="deleteTask(' + t.id + ')">حذف</button></div>';
+}
+function sortTasks(list) {
+  return list.slice().sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    const da = a.due || '9999', dbb = b.due || '9999';
+    if (da !== dbb) return da < dbb ? -1 : 1;
+    return PRI_ORDER[a.priority] - PRI_ORDER[b.priority];
+  });
+}
+
+function renderHome() {
+  const open = db.tasks.filter(t => !t.done);
+  const today = todayStr();
+  const overdue = open.filter(t => t.due && t.due < today);
+  const dueToday = open.filter(t => t.due === today);
+  const doneToday = db.tasks.filter(t => t.doneAt === today).length;
+  const upcoming = sortTasks(open.filter(t => t.due && t.due > today)).slice(0, 5);
+  const important = sortTasks(open.filter(t => t.priority === 'high')).slice(0, 5);
+
+  let h = '<div class="card"><h2>خلاصه‌ی امروز</h2><div class="stats">' +
+    '<div class="stat"><b>' + fa(open.length) + '</b><span>وظیفه‌ی باز</span></div>' +
+    '<div class="stat"><b>' + fa(doneToday) + '</b><span>انجام‌شده امروز</span></div>' +
+    '<div class="stat"><b>' + fa(dueToday.length) + '</b><span>مهلت امروز</span></div>' +
+    '<div class="stat"><b style="color:' + (overdue.length ? 'var(--danger)' : 'inherit') + '">' + fa(overdue.length) + '</b><span>گذشته از مهلت</span></div></div></div>';
+
+  h += '<div class="card"><h2>کارهای مهم</h2>' +
+    (important.length ? important.map(taskHTML).join('') : '<div class="empty">وظیفه‌ی مهمی ندارید 🎉</div>') + '</div>';
+  h += '<div class="card"><h2>مهلت‌های نزدیک</h2>' +
+    (upcoming.length ? upcoming.map(taskHTML).join('') : '<div class="empty">مهلت نزدیکی ثبت نشده.</div>') + '</div>';
+  h += '<div class="card"><button style="width:100%" onclick="view=\'tasks\';render()">+ افزودن وظیفه</button></div>';
+  return h;
+}
+
+function renderTasks() {
+  const e = editingId ? db.tasks.find(x => x.id === editingId) : null;
+  let h = '<div class="card"><h2>' + (e ? 'ویرایش وظیفه' : 'وظیفه‌ی جدید') + '</h2>' +
+    '<input type="text" id="f-title" placeholder="عنوان وظیفه" value="' + (e ? esc(e.title) : '') + '">' +
+    '<select id="f-pri">' +
+      ['high','mid','low'].map(k => '<option value="' + k + '"' + ((e ? e.priority : 'mid') === k ? ' selected' : '') + '>اولویت: ' + PRI[k][0] + '</option>').join('') +
+    '</select>' +
+    '<label class="meta">مهلت (اختیاری)</label>' +
+    '<input type="date" id="f-due" value="' + (e ? e.due : '') + '">' +
+    '<input type="number" id="f-min" placeholder="زمان تخمینی (دقیقه)" min="0" value="' + (e && e.minutes ? e.minutes : '') + '">' +
+    '<div class="row"><button onclick="addOrUpdateTask()">' + (e ? 'ذخیره‌ی تغییرات' : 'افزودن') + '</button>' +
+    (e ? '<button class="sec" onclick="cancelEdit()">انصراف</button>' : '') + '</div></div>';
+
+  const today = todayStr();
+  let list = db.tasks;
+  if (filter === 'open') list = list.filter(t => !t.done);
+  else if (filter === 'done') list = list.filter(t => t.done);
+  else if (filter === 'overdue') list = list.filter(t => !t.done && t.due && t.due < today);
+  const names = { open:'باز', overdue:'گذشته', done:'انجام‌شده', all:'همه' };
+  h += '<div class="card"><div class="filters">' +
+    Object.keys(names).map(k => '<button class="sec ' + (filter === k ? 'active' : '') + '" onclick="setFilter(\'' + k + '\')">' + names[k] + '</button>').join('') +
+    '</div>' + (list.length ? sortTasks(list).map(taskHTML).join('') : '<div class="empty">موردی نیست.</div>') + '</div>';
+  return h;
+}
+
+function renderSoon(title) {
+  return '<div class="card soon"><h2>' + title + '</h2>این بخش در گام‌های بعدی ساخته می‌شود.</div>';
+}
+
+function render() {
+  const app = document.getElementById('app');
+  if (view === 'home') app.innerHTML = renderHome();
+  else if (view === 'tasks') app.innerHTML = renderTasks();
+  else if (view === 'school') app.innerHTML = renderSoon('🎓 مدرسه');
+  else app.innerHTML = renderSoon('🔁 عادت‌ها');
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.v === view));
+}
+
+document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
+  view = b.dataset.v; editingId = null; render(); window.scrollTo(0,0);
+}));
+
+load(); tick(); setInterval(tick, 30000); render();
 </script>
 </body>
 </html>
