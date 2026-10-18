@@ -471,6 +471,7 @@ function renderProgress() {
     '<div class="stat"><b>' + fa(hab) + '</b><span>دفعات انجام عادت</span></div>' +
     '<div class="stat"><b>' + fa(active) + '</b><span>روز فعال از ' + fa(range) + '</span></div>' +
     '<div class="stat"><b>' + rate + '</b><span>پایبندی به عادت‌های روزانه</span></div></div></div>';
+  h += reportsHTML(days);
   h += dayDetailHTML(selDay);
   if (pendingImport) {
     const p = pendingImport, c = (k) => fa((p[k] || []).length);
@@ -897,7 +898,9 @@ function saveBlock() {
   const subEl = document.getElementById('b-sub');
   const data = { date: planDay, title, start, end, cat, planned: document.getElementById('b-planned').value === '1',
     subjectId: (cat === 'study' && subEl && subEl.value) ? parseInt(subEl.value) : null };
-  if (isEd('blk')) { const b = db.blocks.find(x => x.id === ed.id); if (b) Object.assign(b, data); ed = null; }
+  const prevB = isEd('blk') ? db.blocks.find(x => x.id === ed.id) : null;
+  if (data.planned || (prevB && prevB.wasPlanned)) data.wasPlanned = true;
+  if (isEd('blk')) { if (prevB) Object.assign(prevB, data); ed = null; }
   else db.blocks.push(Object.assign({ id: Date.now() }, data));
   planForm = false; save(); render();
 }
@@ -905,6 +908,141 @@ function deleteBlock(id) {
   if (!confirm('این فعالیت حذف شود؟')) return;
   db.blocks = db.blocks.filter(x => x.id !== id); ed = null; planForm = false; save(); render();
 }
+/* ============ پیشنهاد برنامه‌ی روز ============ */
+let proposal = null;
+function minToHM(m) { return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
+function markBlockDone(id) {
+  const b = db.blocks.find(x => x.id === id); if (!b) return;
+  b.planned = false; b.wasPlanned = true; ed = null; planForm = false; save(); render();
+}
+function dayCfg() {
+  const c = db.settings || {};
+  return { start: c.dayStart || '08:00', end: c.dayEnd || '22:00', brk: c.breakMin == null ? 10 : c.breakMin, def: c.defaultMin || 30 };
+}
+function suggestPlan() {
+  const day = planDay, t = todayStr();
+  if (day < t) { alert('برای روزهای گذشته پیشنهاد ساخته نمی‌شود.'); return; }
+  const start = document.getElementById('pc-start').value, end = document.getElementById('pc-end').value;
+  const brk = Math.max(0, Math.min(60, parseInt(document.getElementById('pc-brk').value) || 0));
+  const def = Math.max(5, Math.min(240, parseInt(document.getElementById('pc-def').value) || 30));
+  if (!start || !end || toMin(end) - toMin(start) < 30) { alert('بازه‌ی روز باید حداقل ۳۰ دقیقه باشد.'); return; }
+  db.settings = { dayStart: start, dayEnd: end, breakMin: brk, defaultMin: def }; save();
+
+  let from = toMin(start); const to = toMin(end);
+  if (day === t) from = Math.max(from, Math.ceil(toMin(nowHM()) / 5) * 5);
+  const busy = db.blocks.filter(b => b.date === day).map(b => [toMin(b.start), toMin(b.end)]).sort((a, b) => a[0] - b[0]);
+  const gaps = []; let cur = from;
+  busy.forEach(([bs, be]) => { if (cur < to && bs > cur) gaps.push([cur, Math.min(bs, to)]); cur = Math.max(cur, be); });
+  if (cur < to) gaps.push([cur, to]);
+
+  const already = new Set(db.blocks.filter(b => b.date === day && b.ref).map(b => b.ref));
+  const rel = (d) => daysFromToday(d) - daysFromToday(day);
+  const PR = { high:0, mid:1, low:2 };
+  const cands = [];
+  db.tasks.filter(x => !x.done && !already.has('t' + x.id)).forEach(x => {
+    const r = x.due ? rel(x.due) : null;
+    let score, reason;
+    if (r !== null && r < 0) { score = 0; reason = 'گذشته از مهلت (مهلت تغییر نمی‌کند)'; }
+    else if (r === 0) { score = 1; reason = 'مهلت همین روز'; }
+    else if (r !== null && r <= 3) { score = 2 + r / 10; reason = 'مهلت نزدیک (' + daysLabel(daysFromToday(x.due)) + ')'; }
+    else if (x.priority === 'high') { score = 3; reason = 'اولویت زیاد'; }
+    else { score = 4 + (PR[x.priority] || 1); reason = 'برای استفاده از زمان خالی'; }
+    cands.push({ score, key:'t' + x.id, title:x.title, dur:Math.max(5, Math.round((x.minutes || def) / 5) * 5), reason, cat:'work', subjectId:null });
+  });
+  db.assignments.filter(x => !x.done && x.due && !already.has('a' + x.id) && rel(x.due) <= 7).forEach(x => {
+    const r = rel(x.due);
+    const score = r < 0 ? 0 : r === 0 ? 1 : 2 + r / 10;
+    const reason = r < 0 ? 'تکلیف گذشته از مهلت (مهلت تغییر نمی‌کند)' : r === 0 ? 'مهلت تکلیف همین روز' : 'مهلت تکلیف نزدیک (' + daysLabel(daysFromToday(x.due)) + ')';
+    cands.push({ score, key:'a' + x.id, title:x.title, dur:45, reason, cat:'study', subjectId:x.subjectId });
+  });
+  cands.sort((a, b) => a.score - b.score);
+
+  const items = [], unplaced = [];
+  cands.forEach(c => {
+    const g = gaps.find(z => z[1] - z[0] >= c.dur);
+    if (!g) { unplaced.push(c); return; }
+    items.push({ key:c.key, title:c.title, s:g[0], e:g[0] + c.dur, reason:c.reason, cat:c.cat, subjectId:c.subjectId, on:true });
+    g[0] += c.dur + brk;
+  });
+  items.sort((a, b) => a.s - b.s);
+  proposal = { day, items, unplaced, brk };
+  render();
+}
+function propToggle(i) { if (proposal && proposal.items[i]) proposal.items[i].on = !proposal.items[i].on; }
+function dismissProposal() { proposal = null; render(); }
+function applyProposal() {
+  if (!proposal) return;
+  let n = 0;
+  proposal.items.filter(x => x.on).forEach((x, i) => {
+    db.blocks.push({ id: Date.now() + i, date: proposal.day, title: x.title, start: minToHM(x.s), end: minToHM(x.e), cat: x.cat,
+      subjectId: x.subjectId || null, planned: true, wasPlanned: true, ref: x.key });
+    n++;
+  });
+  proposal = null; save(); render();
+  if (n) alert(fa(n) + ' فعالیت به‌صورت «برنامه‌ریزی‌شده» اضافه شد. می‌توانید هر کدام را در جدول ویرایش یا حذف کنید.');
+}
+function planCardHTML() {
+  const c = dayCfg();
+  let h = '<div class="card"><h2>✨ پیشنهاد برنامه‌ی این روز</h2>' +
+    '<div class="meta" style="margin-bottom:8px">کارهای باز را بر اساس مهلت و اولویت در زمان‌های خالی می‌چیند. تا تأیید نکنید چیزی ثبت یا تغییر نمی‌کند.</div>' +
+    '<div class="row"><div style="flex:1"><label class="meta">شروع روز</label><input type="time" id="pc-start" value="' + c.start + '"></div>' +
+    '<div style="flex:1"><label class="meta">پایان روز</label><input type="time" id="pc-end" value="' + c.end + '"></div></div>' +
+    '<div class="row"><div style="flex:1"><label class="meta">استراحت بین کارها (دقیقه)</label><input type="number" id="pc-brk" min="0" max="60" value="' + c.brk + '"></div>' +
+    '<div style="flex:1"><label class="meta">زمان پیش‌فرض هر کار (دقیقه)</label><input type="number" id="pc-def" min="5" max="240" value="' + c.def + '"></div></div>' +
+    '<button style="width:100%" onclick="suggestPlan()">ساخت پیشنهاد</button>';
+  if (proposal && proposal.day === planDay) {
+    h += '<div style="border-top:1px solid var(--border);margin:12px 0 6px"></div>';
+    if (!proposal.items.length) h += '<div class="empty">کار بازی برای چیدن پیدا نشد، یا زمان خالی کافی نیست.</div>';
+    else {
+      h += '<div class="meta" style="margin-bottom:6px">این موارد پیشنهاد شده‌اند. هر کدام را که نمی‌خواهید از حالت انتخاب دربیاورید:</div>' +
+        proposal.items.map((x, i) => '<div class="task"><input type="checkbox" checked onchange="propToggle(' + i + ')"><div class="body"><div class="title">' + esc(x.title) +
+          '</div><div class="meta">' + faStr(minToHM(x.s)) + ' تا ' + faStr(minToHM(x.e)) + ' • ' + x.reason + '</div></div></div>').join('') +
+        '<div class="row" style="margin-top:10px"><button onclick="applyProposal()">افزودن انتخاب‌شده‌ها به برنامه</button><button class="sec" onclick="dismissProposal()">نادیده گرفتن</button></div>';
+    }
+    if (proposal.unplaced.length) h += '<div class="meta" style="margin-top:10px">⚠ جای خالی کافی نبود و در پیشنهاد نیامدند (هیچ‌کدام حذف یا عقب‌انداخته نشده‌اند):<br>' +
+      proposal.unplaced.slice(0, 8).map(x => '• ' + esc(x.title)).join('<br>') + '</div>';
+    if (!proposal.items.length) h += '<div class="row" style="margin-top:8px"><button class="sec" onclick="dismissProposal()">بستن</button></div>';
+  }
+  return h + '</div>';
+}
+
+/* ============ گزارش‌های زمانی ============ */
+function reportsHTML(days) {
+  const set = new Set(days), t = todayStr();
+  const bl = db.blocks.filter(b => set.has(b.date));
+  const mins = (b) => toMin(b.end) - toMin(b.start);
+  const sum = (list) => list.reduce((a, b) => a + mins(b), 0);
+  const actual = bl.filter(b => !b.planned);
+  const rowsHTML = (rows) => {
+    const max = Math.max(1, ...rows.map(r => r[2]));
+    return rows.map(r => '<div style="margin:8px 0"><div class="meta" style="display:flex;justify-content:space-between"><span>' + r[0] + '</span><span>' + fmtDur(r[2]) +
+      '</span></div><div class="bar" style="height:10px"><i style="width:' + (r[2] / max * 100) + '%;background:' + r[1] + '"></i></div></div>').join('');
+  };
+  const byCat = {}; actual.forEach(b => { byCat[b.cat] = (byCat[b.cat] || 0) + mins(b); });
+  const catRows = Object.keys(byCat).sort((a, b) => byCat[b] - byCat[a]).map(k => [CATS[k] ? CATS[k][0] : 'سایر', CATS[k] ? CATS[k][1] : '#6b7385', byCat[k]]);
+  let h = '<div class="card"><h2>زمان ثبت‌شده به تفکیک فعالیت</h2>' +
+    (catRows.length ? rowsHTML(catRows) + '<div class="meta">مجموع: ' + fmtDur(sum(actual)) + ' • فقط فعالیت‌های «انجام‌شده» در برنامه‌ی روز.</div>'
+      : '<div class="empty">در این بازه فعالیت انجام‌شده‌ای در برنامه‌ی روز ثبت نشده.</div>') + '</div>';
+  const bySub = {}; actual.filter(b => b.cat === 'study').forEach(b => { const k = b.subjectId || 0; bySub[k] = (bySub[k] || 0) + mins(b); });
+  const subRows = Object.keys(bySub).sort((a, b) => bySub[b] - bySub[a]).map(k => { const sb = getSub(parseInt(k)); return [sb ? esc(sb.name) : 'بدون درس', sb ? sb.color : '#6b7385', bySub[k]]; });
+  if (subRows.length) h += '<div class="card"><h2>زمان مطالعه به تفکیک درس</h2>' + rowsHTML(subRows) + '</div>';
+
+  const planBlocks = bl.filter(b => b.planned || b.wasPlanned);
+  if (planBlocks.length) {
+    const planned = sum(planBlocks), done = sum(planBlocks.filter(b => !b.planned));
+    const pending = sum(planBlocks.filter(b => b.planned && b.date < t));
+    const extra = sum(actual.filter(b => !b.wasPlanned));
+    h += '<div class="card"><h2>برنامه‌ریزی‌شده در برابر انجام‌شده</h2><div class="stats">' +
+      '<div class="stat"><b>' + fmtDur(planned) + '</b><span>برنامه‌ریزی‌شده (برآورد)</span></div>' +
+      '<div class="stat"><b>' + fmtDur(done) + '</b><span>از آن انجام‌شده (ثبت واقعی)</span></div>' +
+      '<div class="stat"><b>' + (planned ? fa(Math.round(done / planned * 100)) + '٪' : '—') + '</b><span>درصد انجام برنامه</span></div>' +
+      '<div class="stat"><b>' + fmtDur(extra) + '</b><span>انجام‌شده بدون برنامه‌ی قبلی</span></div></div>' +
+      (pending ? '<div class="meta" style="margin-top:8px">' + fmtDur(pending) + ' از برنامه‌های روزهای گذشته هنوز «انجام‌نشده» مانده؛ می‌توانید در برنامه‌ی روز آن‌ها را ویرایش کنید یا دوباره بچینید.</div>' : '') +
+      '<div class="meta" style="margin-top:6px">برنامه‌ریزی‌شده برآورد شماست و انجام‌شده رکورد واقعی. وقتی «✓ انجام شد» را می‌زنید ساعت‌ها همان برنامه می‌مانند؛ اگر واقعی فرق داشت ویرایش کنید.</div></div>';
+  }
+  return h;
+}
+
 function renderPlan() {
   const t = todayStr(); if (!planDay) planDay = t;
   const blocks = db.blocks.filter(b => b.date === planDay);
@@ -932,12 +1070,13 @@ function renderPlan() {
         db.subjects.map(s => '<option value="' + s.id + '"' + (e && e.subjectId === s.id ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('') + '</select>' : '') +
       '<select id="b-planned"><option value="0"' + (!planned ? ' selected' : '') + '>انجام‌شده (ثبت واقعی)</option><option value="1"' + (planned ? ' selected' : '') + '>برنامه‌ریزی‌شده (هنوز انجام نشده)</option></select>' +
       '<div class="row"><button onclick="saveBlock()">' + (e ? 'ذخیره' : 'افزودن') + '</button><button class="sec" onclick="cancelEdit()">انصراف</button>' +
-      (e ? '<button class="del" onclick="deleteBlock(' + e.id + ')">حذف</button>' : '') + '</div></div>';
+      (e && e.planned ? '<button class="sec" onclick="markBlockDone(' + e.id + ')">✓ انجام شد</button>' : '') + (e ? '<button class="del" onclick="deleteBlock(' + e.id + ')">حذف</button>' : '') + '</div></div>';
   } else {
     h += '<div class="card"><button style="width:100%" onclick="planAt(\'\')">＋ ثبت یا برنامه‌ریزی فعالیت</button>' +
       '<div class="meta" style="margin-top:6px">روی هر ساعت از جدول هم بزنید تا از همان ساعت شروع شود. کارهای تیک‌خورده خودکار در جای خودشان می‌نشینند (خاکستری).</div></div>';
   }
 
+  if (!planForm && planDay >= t) h += planCardHTML();
   const due = [];
   db.tasks.filter(x => !x.done && x.due === planDay).forEach(x => due.push('✅ ' + esc(x.title)));
   db.assignments.filter(x => !x.done && x.due === planDay).forEach(x => due.push('📚 ' + esc(x.title)));
